@@ -1,15 +1,25 @@
-﻿import { NextResponse } from 'next/server';
-import webpush from 'web-push';
+Set-Content -Path app/api/poke/route.ts -Encoding utf8 -Value @'
+import { NextResponse } from 'next/server';
+import { createRequire } from 'module';
 import { supabase } from '@/lib/supabase';
 
-webpush.setVapidDetails(
-  'mailto:couple@example.com',
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+const require = createRequire(import.meta.url);
+const webpush = require('web-push');
 
 export async function POST(req: Request) {
   try {
+    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const privateKey = process.env.VAPID_PRIVATE_KEY;
+
+    if (!publicKey || !privateKey) {
+      return NextResponse.json(
+        { error: '서버 VAPID 키 환경변수가 설정되지 않았어요.' },
+        { status: 500 }
+      );
+    }
+
+    webpush.setVapidDetails('mailto:couple@example.com', publicKey, privateKey);
+
     const { targetRole, senderName, slot } = await req.json();
 
     const { data, error } = await supabase
@@ -37,3 +47,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '알림 전송 실패' }, { status: 500 });
   }
 }
+'@
