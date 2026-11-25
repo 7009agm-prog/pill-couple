@@ -26,6 +26,60 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function loadImageElement(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('이미지를 불러올 수 없습니다.'));
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressImage(file: File, maxWidth = 1280, quality = 0.8): Promise<File> {
+  let width = 0;
+  let height = 0;
+  let drawSource: CanvasImageSource;
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(file);
+    width = bitmap.width;
+    height = bitmap.height;
+    drawSource = bitmap;
+  } else {
+    const img = await loadImageElement(file);
+    width = img.naturalWidth || img.width;
+    height = img.naturalHeight || img.height;
+    drawSource = img;
+  }
+
+  const scale = Math.min(1, maxWidth / width);
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return file;
+
+  ctx.drawImage(drawSource, 0, 0, targetWidth, targetHeight);
+
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', quality)
+  );
+
+  if (!blob) return file;
+
+  const baseName = file.name.replace(/\.[^/.]+$/, '') || 'photo';
+  return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+}
+
 export default function Home() {
   const [todayStr, setTodayStr] = useState<string>('');
   const [myRole, setMyRole] = useState<Role | null>(null);
@@ -149,10 +203,18 @@ export default function Home() {
     if (!file || !myRole || !selectedDate) return;
     setUploadingSlot(slot);
     try {
-      const ext = file.name.split('.').pop();
+      const processedFile = await compressImage(file, 1280, 0.8);
+      const ext = processedFile.name.split('.').pop()?.toLowerCase() || 'jpg';
       const filePath = selectedDate + '/' + myRole + '_slot' + slot + '_' + Date.now() + '.' + ext;
-      const { error: uploadError } = await supabase.storage.from('pill-photos').upload(filePath, file);
+
+      const { error: uploadError } = await supabase.storage
+        .from('pill-photos')
+        .upload(filePath, processedFile, {
+          contentType: processedFile.type || 'image/jpeg',
+          upsert: true,
+        });
       if (uploadError) throw uploadError;
+
       const { data: urlData } = supabase.storage.from('pill-photos').getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('check_ins').upsert(
         {
@@ -165,11 +227,16 @@ export default function Home() {
         { onConflict: 'user_role,date_str,slot' }
       );
       if (dbError) throw dbError;
+
       setNote('');
       await fetchMonthCheckIns(currentMonth);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
-      alert('사진 업로드에 실패했습니다.');
+      const message =
+        e && typeof e === 'object' && 'message' in e
+          ? String((e as { message?: unknown }).message)
+          : String(e);
+      alert('사진 업로드에 실패했습니다: ' + message);
     } finally {
       setUploadingSlot(null);
     }
