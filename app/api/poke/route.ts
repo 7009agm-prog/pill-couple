@@ -47,4 +47,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '알림 전송 실패' }, { status: 500 });
   }
 }
-'@
