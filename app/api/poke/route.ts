@@ -1,4 +1,3 @@
-Set-Content -Path app/api/poke/route.ts -Encoding utf8 -Value @'
 import { NextResponse } from 'next/server';
 import { createRequire } from 'module';
 import { supabase } from '@/lib/supabase';
